@@ -1,0 +1,37 @@
+name: Run tests on Push
+
+on: [push] 
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    env:
+      RAILS_ENV: test
+    services:
+      selenium:
+        image: selenium/standalone-chrome
+        ports:
+          - 4444:4444
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup Ruby and install gems
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Init MySQL
+        # adding the service doesn't start it
+        run: sudo service mysql start
+        # chromedriver comes with our runner, so just start it up
+        # this is a magic incantation found in various chromedriver actions, tests don't work without it
+      - run: |
+          export DISPLAY=:99
+          chromedriver --url-base=/wd/hub &
+          sudo Xvfb -ac :99 -screen 0 1280/1024/24 > /dev/null 2>&1 & # optional
+      - name: Setup test database
+        run: bundle exec rake db:drop db:create db:schema:load db:seed
+      - name: Migrate test database
+        run: bundle exec rake db:migrate:redo
+      - name: Run tests
+        run: bundle exec rspec

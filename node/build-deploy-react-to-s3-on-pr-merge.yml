@@ -1,0 +1,87 @@
+# This workflow uses Doppler - https://doppler.com
+# Doppler is a secrets management service, similar to chamber or 1pass
+
+name: Deploy React to S3
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DOPPLER_TOKEN: ${{ secrets.REACT_DOPPLER_TOKEN }}
+  # Must be us-east-1 for Cloudfront
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+# Do not run workflow concurrently
+concurrency: build-deploy-react-to-s3-on-pr-merge
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    name: Run tests
+    steps:
+        - uses: actions/checkout@v3
+        # This project is locked to an old version of node, so use that
+        - name: Use Node.js 16
+          uses: actions/setup-node@v3
+          with:
+            node-version: 16
+        # A nice one-line cache action that wraps actions/cache
+        - name: Yarn cache
+          uses: c-hive/gha-yarn-cache@v2
+        - name: Install dependencies
+          run: yarn
+        - name: Run tests
+          run: yarn test
+
+  build-and-deploy-react-app-to-s3:
+    # Don't build and deploy if tests fail
+    needs: [run-tests]
+    runs-on: ubuntu-latest
+    name: Build and deploy app to S3
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v1
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - name: Set config values from Doppler
+        # The values in Doppler can't be passed to our actions like we would with the CLI
+        # Here we write them to GITHUB_ENV, making them available in the env context
+        # Note that these are configuration values, not secrets!
+        # If these were secrets, you would want to use add-mask to hide them in logs
+        run: |
+          echo "HOST_S3_BUCKET=$(doppler secrets get HOST_S3_BUCKET --plain)" >> $GITHUB_ENV
+          echo "CLOUDFRONT_ID=$(doppler secrets get CLOUDFRONT_ID --plain)" >> $GITHUB_ENV
+      - name: Yarn cache
+        uses: c-hive/gha-yarn-cache@v2
+      - name: Install dependencies
+        run: yarn
+      - name: Build app
+        # Here we use the Doppler CLI to pass values to our build command
+        run: doppler run -- yarn build
+      - name: Deploy built app to S3
+        # Don't deploy if build failed
+        if: success()
+        uses: jakejarvis/s3-sync-action@v0.5.1 
+        with:
+          args: --follow-symlinks --delete
+        env:
+          AWS_S3_BUCKET: ${{ env.HOST_S3_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          SOURCE_DIR: react-app
+      - name: Invalidate Cloudfront
+        uses: chetan/invalidate-cloudfront-action@v2
+        env:
+          DISTRIBUTION: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          PATHS: '/*'
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}

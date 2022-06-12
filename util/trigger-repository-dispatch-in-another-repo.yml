@@ -1,0 +1,22 @@
+name: Trigger Repository Dispatch in foo/bar repo
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy files
+        run: aws s3 cp ./ s3://mybucket/
+      # This will kick off the workflow that listens for the qux event in the bar repo
+      - name: Repository Dispatch
+        uses: peter-evans/repository-dispatch@v1
+        with:
+          repository: foo/bar
+          event-type: qux
+          token: ${{ secrets.SERVICE_PAT }} # PAT needed here

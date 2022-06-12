@@ -1,0 +1,15 @@
+name: Build and Run
+on:
+  schedule:
+    - cron: "0 13 * * 1-5" # 9am EST M-F
+    - cron: "0 23 * * 1-5" # 4pm PST M-F
+
+jobs:
+  buildAndRun:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - run: npm install
+      - run: npm start

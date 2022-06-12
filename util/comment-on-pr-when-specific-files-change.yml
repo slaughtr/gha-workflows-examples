@@ -1,0 +1,42 @@
+name: Check for Changed DB Files
+
+# Triggers when a PR is opened or when new commits are added to a PR
+on:
+  pull_request:
+    types: [synchronize, opened]
+
+concurrency: staging_environment_deploy_group
+
+jobs:
+  check-for-migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v19
+        with:
+          files: db
+          # This will make the action only look for changed files since our last commit
+          # Which should prevent it from firing on every commit to a PR
+          since_last_remote_commit: 'true'
+      - name: Comment on PR
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.added_files }}
+        if: steps.changed-files.outputs.added_files != ''
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const { CHANGED_FILES } = process.env;
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `DB CHANGES DETECTED
+                     Attention: This PR contains database changes. Please review the changes carefully and ensure they are correct.
+                    ${CHANGED_FILES}
+                    `
+            })

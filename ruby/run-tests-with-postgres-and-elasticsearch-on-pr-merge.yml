@@ -1,0 +1,39 @@
+name: Run Tests with Databases
+
+on: [push]
+
+env:
+  API_TOKEN: test-token
+  ELASTICSEARCH_INDEX_NAME: testing
+  ELASTICSEARCH_URL: http://localhost:9200
+
+jobs:
+  tests:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    env:
+      RAILS_ENV: test
+      POSTGRES_DB: test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    services:
+      postgres:
+        image: postgres:latest
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup elasticsearch
+        uses: ankane/setup-elasticsearch@v1
+      - name: Setup Ruby and install gems
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Setup test database
+        run: bin/rails db:setup
+      - name: Run tests
+        run: bundle exec rspec

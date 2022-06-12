@@ -1,0 +1,70 @@
+# This workflow tests a composite action whenever the action or this file changes.
+# It would be placed in .github/workflows directory inside the repo with the composite action.
+
+name: Composite Workflow Test
+
+on:
+  push:
+    # These tests would have run during development and would be visible during the PR process.
+    # Therefore, no need to run them when the PR is merged into main.
+    branches-ignore:
+      - 'main'
+        
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+jobs:
+  tests:
+    name: Test composite workflow
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          # This is needed for changed-files
+          fetch-depth: 0
+      - name: Get changed files in this commit
+        id: changed-files
+        uses: tj-actions/changed-files@v19
+        with:
+          # This assumes our workflow action.yml is in the root of the repo
+          files: |
+            action.yml
+            .github/workflows/composite-workflow-test-on-push.yml
+          # This will make the action only look for changed files since our last commit
+          # Which prevents it from firing on every commit to a PR every time
+          since_last_remote_commit: "true"
+      - name: Run composite workflow with bad Github token
+        # The composite workflow we're testing  is allowed to fail, but it shouldn't fail the the calling workflow
+        # With continue-on-error, the error won't fail the workflow
+        continue-on-error: true
+        # Only run this action if we've changed the relevant files outlined in changed-files
+        if: steps.changed-files.outputs.any_modified == 'true'
+        # uses here targets our action.yml in the root of the repo
+        uses: ./
+        with:
+          # Fake values should cause errors
+          GITHUB_TOKEN: "asdf1234"
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+      - name: Run composite workflow with bad AWS credentials
+        continue-on-error: true
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: ./
+        with:
+          # Fake values should cause errors
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: "asdf1234"
+          AWS_SECRET_ACCESS_KEY: "asdf1234"
+      - name: Run Custom build-metrics action
+        # No continue-on-error here, as we also want to actually test the workflow
+        # If this step fails, the whole workflow fails, and we get our red X in our checks
+        if: steps.changed-files.outputs.any_modified == 'true'
+        uses: ./
+        with:
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID_PROD }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY_PROD }}

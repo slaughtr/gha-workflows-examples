@@ -1,0 +1,23 @@
+{
+    "categories": [
+        {
+            "title": "## New Features",
+            "labels": ["feature", "feat"]
+        },
+        {
+            "title": "## Fixes",
+            "labels": ["fix", "bugfix", "hotfix"]
+        }
+    ],
+    "label_extractor": [
+        {
+            "on_property": "title"
+        }
+    ],
+    "sort": "ASC",
+    "template": "${{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n${{UNCATEGORIZED}}\n</details>",
+    "pr_template": "- ${{TITLE}}\n   - PR: #${{NUMBER}}\n   - Author: ${{AUTHOR}}",
+    "empty_template": "No changes detected for release",
+    "max_pull_requests": 1000,
+    "max_back_track_time_days": 1000
+}

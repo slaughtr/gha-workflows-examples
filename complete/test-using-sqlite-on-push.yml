@@ -1,0 +1,35 @@
+name: Test App using sqlite on push
+
+on:
+  push:
+    branches-ignore:
+      - master
+
+jobs:
+  prepare-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Using a matrix will run the same action multiple times with different values
+      matrix:
+        node-version: [16.x, 18.x]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout/@v2
+      - name: Cache node modules
+        uses: c-hive/gha-npm-cache@v1
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install Dependencies
+        run: npm install
+      - name: Create sqlite database
+        run: |
+          mkdir -p database
+          touch database/database.sqlite
+      - name: Run Tests
+        env:
+          NODE_ENV: test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: database/database.sqlite
+        run: npm run test

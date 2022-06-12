@@ -1,0 +1,49 @@
+name: Deploy Lambda Function
+
+# if in pr-merge ensures this is on a merge, not a request_review etc
+on:
+  push:
+    branches:
+      - main
+
+concurrency: production_environment_deploy_group
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    env:
+      STAGE: staging
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - name: npm install
+        run: npm ci
+      - name: npm install serverless
+        run: npm install serverless -g
+      - name: serverless deploy
+        run: sls deploy
+        
+  deploy-prod:
+    needs: [deploy-staging]
+    runs-on: ubuntu-latest
+    env:
+      STAGE: production
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - name: npm install
+        run: npm ci
+      - name: npm install serverless
+        run: npm install serverless -g
+      - name: serverless deploy
+        run: sls deploy

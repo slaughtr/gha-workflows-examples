@@ -1,0 +1,16 @@
+name: Run Xcode Tests On Workflow Dispatch (Manually)
+
+on: workflow_dispatch
+  
+concurrency: run-xcode-tets-on-dispatch
+
+jobs:
+  run-tests:
+    runs-on: macos-latest
+    env:
+      SIM_DESTINATION: 'platform=iOS Simulator,name=iPhone 13,OS=15.0'
+    steps:
+      - uses: actions/checkout@v3
+      # Pretty print for our test output
+      - run: brew install xcbeautify
+      - run: xcodebuild test -workspace Example.xcworkspace -scheme Example -destination "${{ env.SIM_DESTINATION }}" | xcbeautify

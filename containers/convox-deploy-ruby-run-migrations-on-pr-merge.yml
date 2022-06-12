@@ -1,0 +1,65 @@
+name: Deploy and Run Migrations on PR Merge
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: staging_environment_deploy_group
+
+jobs:
+  deploy-to-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Download Convox
+        run: curl -L https://convox.com/cli/linux/convox -o ~/convox
+      - run: chmod 755 ~/convox
+      - run: cp convox-staging.yml convox.yml
+      # convox context doesn't stick unless you give an absolute path in GHA for some reason
+      - run: ~/convox login console.convox.com
+      # STAGING DEPLOYMENT
+      - run: ~/convox login console.convox.com && ~/convox switch foo/app-staging
+      - run: cp convox-staging.yml convox.yml
+      - run: ~/convox login console.convox.com && ~/convox deploy
+      - run: ~/convox login console.convox.com && ~/convox apps wait
+      - name: Get convox ID for migration
+        run: |
+            echo 'MIGRATION_ID<<EOF' >> $GITHUB_ENV
+            ~/convox login console.convox.com && ~/convox ps --service app | sed -n '1!p' | head -n 1 | awk '{print $1;}' >> $GITHUB_ENV
+            echo 'EOF' >> $GITHUB_ENV
+      - name: Check for migrations
+        run: echo "MIGRATION_COUNT=$(~/convox exec "$MIGRATION_ID" "bin/rake db:migrate:status" | grep down | wc -l)" >> $GITHUB_ENV
+      - name: Run migrations
+        run: ~/convox login console.convox.com && ~/convox exec $MIGRATION_ID "bin/rails db:migrate"
+        if: ${{ env.MIGRATION_COUNT > 0 }}
+
+  deploy-to-prod:
+    needs: [deploy-to-staging]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Download Convox
+        run: curl -L https://convox.com/cli/linux/convox -o ~/convox
+      - run: chmod 755 ~/convox
+      - run: cp convox-production.yml convox.yml
+      - run: ~/convox login console.convox.com
+      # PRODUCTION DEPLOYMENT
+      - run: ~/convox login console.convox.com && ~/convox switch foo/app-production
+      - run: cp convox-production.yml convox.yml
+      - run: ~/convox login console.convox.com && ~/convox deploy
+      - run: ~/convox login console.convox.com && ~/convox apps wait
+      - name: Get convox ID for migration
+        run: |
+            echo 'MIGRATION_ID<<EOF' >> $GITHUB_ENV
+            ~/convox login console.convox.com && ~/convox ps --service app | sed -n '1!p' | head -n 1 | awk '{print $1;}' >> $GITHUB_ENV
+            echo 'EOF' >> $GITHUB_ENV
+      - name: Check for migrations
+        run: echo "MIGRATION_COUNT=$(~/convox exec "$MIGRATION_ID" "bin/rake db:migrate:status" | grep down | wc -l)" >> $GITHUB_ENV
+      - name: Run migrations
+        run: ~/convox login console.convox.com && ~/convox exec $MIGRATION_ID "bin/rails db:migrate"
+        if: ${{ env.MIGRATION_COUNT > 0 }}

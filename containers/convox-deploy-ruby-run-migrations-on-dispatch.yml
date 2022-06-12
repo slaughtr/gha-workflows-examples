@@ -1,0 +1,33 @@
+name: Production Manual Deploy
+
+on: workflow_dispatch
+  
+jobs:
+  deploy-to-prod:
+    runs-on: ubuntu-latest
+    # This will still allow people to select other branches than main when deploying
+    # however if they are not `main` the workflow will fail immediately
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Download Convox
+        run: curl -L https://convox.com/cli/linux/convox -o ~/convox
+      - run: chmod 755 ~/convox
+      - run: cp convox-production.yml convox.yml
+      - run: ~/convox login console.convox.com
+      - run: ~/convox login console.convox.com && ~/convox switch foo/app-production
+      - run: cp convox-production.yml convox.yml
+      - run: ~/convox login console.convox.com && ~/convox deploy
+      - run: ~/convox login console.convox.com && ~/convox apps wait
+      - name: Get convox ID for migration
+        run: |
+            echo 'MIGRATION_ID<<EOF' >> $GITHUB_ENV
+            ~/convox login console.convox.com && ~/convox ps --service app | sed -n '1!p' | head -n 1 | awk '{print $1;}' >> $GITHUB_ENV
+            echo 'EOF' >> $GITHUB_ENV
+      - name: Check for migrations
+        run: echo "MIGRATION_COUNT=$(~/convox exec "$MIGRATION_ID" "bin/rake db:migrate:status" | grep down | wc -l)" >> $GITHUB_ENV
+      - name: Run migrations
+        run: ~/convox login console.convox.com && ~/convox exec $MIGRATION_ID "bin/rails db:migrate"
+        if: ${{ env.MIGRATION_COUNT > 0 }}

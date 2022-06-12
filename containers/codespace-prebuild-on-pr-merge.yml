@@ -1,0 +1,19 @@
+name: Prebuild Codespace
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  create-prebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: github/codespaces-precache@v1.0.1
+        with:
+          regions: WestUs2
+          sku_name: standardLinux32gb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

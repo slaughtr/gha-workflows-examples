@@ -1,0 +1,21 @@
+name: Validate Semantic PR Title
+
+# Triggers on a PR open or edit (whenever the name can be changed)
+on:
+  pull_request:
+    types: [synchronize, opened, edited, reopened]
+
+jobs:
+  semantic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify semantic PR title
+        uses: amannn/action-semantic-pull-request@v3.4.0
+        with:
+          # in the case of a single-commit PR, also ensure semantic
+          validateSingleCommit: true
+          subjectPattern: ^([A-Z]+\-\d+).*$
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}" didn't match the required pattern. Please ensure that the subject utilizes convententional commits and includes a ticket number, IE: `ci: DEV-123 - add pull request title validation`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

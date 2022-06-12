@@ -1,0 +1,82 @@
+name: Deploy new statsd host
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: install-aws-cli
+        uses: unfor19/install-aws-cli-action@v1
+
+      - uses: webfactory/ssh-agent@v0.5.3
+        with:
+            ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
+
+      - name: Configure AWS Prod Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+
+      - name: Start Instance
+        id: start-instance
+        run: |
+          echo "::set-output name=instance_id::$(aws ec2 run-instances --image-id "$EC2_IMAGE_ID" \
+          --count 1 --instance-type "t3.nano" --key-name statsd-prod \
+          --placement Tenancy=default --query 'Instances[0].InstanceId' \
+          --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=StatsD},{Key=Type,Value=statsd}]" \
+          --security-groups "launch-wizard-1" "StatsD" --output text)"
+
+      - name: Wait for instance to be ready
+        run: aws ec2 wait instance-running --instance-ids ${{ steps.start-instance.outputs.instance_id }}
+
+      - name: Sleep for 30 seconds
+        run: sleep 30
+
+      - name: Get instance hostname
+        id: instance-hostname
+        run: |
+          echo "::set-output name=instance_hostname::$(aws ec2 describe-instances \
+          --instance-ids ${{ steps.start-instance.outputs.instance_id }} \
+          --query 'Reservations[0].Instances[0].PublicDnsName' \
+          --output text)"
+
+      - name: Create app dir on EC2
+        run: ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.instance-hostname.outputs.instance_hostname}} mkdir -p /home/ubuntu/app
+
+      - name: Push files to EC2
+        run: scp -r -o StrictHostKeyChecking=no $GITHUB_WORKSPACE ubuntu@${{ steps.instance-hostname.outputs.instance_hostname }}:/home/ubuntu/app
+
+      - name: Fix directory
+        run: ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.instance-hostname.outputs.instance_hostname }} mv /home/ubuntu/app/statsd/* /home/ubuntu/app
+
+      - name: Build docker-compose on remote host
+        run: ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.instance-hostname.outputs.instance_hostname }} COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker-compose -f /home/ubuntu/app/docker-compose.yml build --no-cache
+
+      - name: Up docker-compose on remote host
+        run: ssh -o StrictHostKeyChecking=no ubuntu@${{ steps.instance-hostname.outputs.instance_hostname }} docker-compose -f /home/ubuntu/app/docker-compose.yml up -d
+
+      - name: Get instance public IP address
+        id: instance-ip
+        run: |
+          echo "::set-output name=instance_ip::$(aws ec2 describe-instances \
+          --instance-ids ${{ steps.start-instance.outputs.instance_id }} \
+          --query 'Reservations[0].Instances[0].PublicIpAddress' \
+          --output text)"
+
+      - uses: mshick/add-pr-comment@v1
+        if: ${{ success() }}
+        with:
+          message: |
+            New host IP address is ${{ steps.instance-ip.outputs.instance_ip }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          # multiple runs due to changes mean we need repeats here
+          allow-repeats: true

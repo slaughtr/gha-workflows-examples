@@ -1,0 +1,28 @@
+name: Deploy Serverless to Prod
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod:
+    environment: prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - name: Yarn cache
+        uses: c-hive/gha-yarn-cache@v2
+      - name: Install Serverless Globally
+        run: yarn global add serverless
+      - name: Install Dependencies
+        run: yarn
+      - name: Configure AWS Production Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+      - name: Deploy Serverless Prod
+        run: serverless deploy --stage prod --verbose

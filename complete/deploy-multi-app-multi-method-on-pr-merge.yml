@@ -1,0 +1,181 @@
+name: Deploy Apps on PR Merge
+
+# if in pr-merge ensures this is on a merge, not a request_review etc
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DATABASE_URL: postgres://postgres:postgres@postgres/postgres_test_db
+  NODE_VERSION: 18
+  AWS_REGION: us-west-2
+
+# Everything in this workflow runs in node 18 container on self-hosted runner 
+jobs:
+  frontend-tests:
+    timeout-minutes: 15
+    runs-on: self-hosted
+    container: node:18
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Run tests
+        run: npm i && npm run test
+
+  backend-tests:
+    timeout-minutes: 15
+    runs-on: self-hosted
+    container: node:18
+    services:
+      postgres:
+        # No port mapping for the self-hosted runner intentionally
+        image: postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Run tests
+        run: npm i && npm run test
+
+  deploy-cdk-staging:
+    timeout-minutes: 15
+    # Run only if tests pass
+    needs: [frontend-tests, backend-tests]
+    runs-on: self-hosted
+    container: node:18
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy CDK resources
+        run: cdk deploy --all --require-approval never
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_STAGING }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_STAGING }}
+          CDK_STAGE: "staging"
+          WORKING_DIRECTORY: cdk
+
+  deploy-web-staging:
+    needs: [deploy-cdk-staging]
+    runs-on: self-hosted
+    container: node:18
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: yarn
+      - name: Build app
+        run: yarn build-stage
+      - name: Deploy to S3
+        run: aws s3 sync ./ "s3://${{env.DEPLOYMENT_S3_BUCKET}}/" --acl public-read --follow-symlinks --delete
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          DEPLOYMENT_S3_BUCKET: "web-staging-bucket"
+      - name: Invalidate Cloudfront
+        uses: chetan/invalidate-cloudfront-action@v2
+        env:
+          DISTRIBUTION: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          PATHS: "/*"
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-shopify-staging:
+    timeout-minutes: 15
+    needs: [deploy-cdk-staging]
+    runs-on: self-hosted
+    container: node:18
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy Shopify
+        run: yarn deploy-shopify-stage
+
+  deploy-cdk-prod:
+    timeout-minutes: 15
+    needs: [frontend-tests, backend-tests, deploy-cdk-staging, deploy-shopify-staging]
+    runs-on: self-hosted
+    container: node:18
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy CDK resources
+        run: cdk deploy --all --require-approval never
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          CDK_STAGE: "prod"
+
+  deploy-web-prod:
+    needs: [deploy-cdk-prod]
+    runs-on: self-hosted
+    container: node:18
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Install dependencies
+        run: yarn
+      - name: Build app
+        run: yarn build-prod
+      - name: Deploy to S3
+        run: aws s3 sync ./ "s3://${{env.DEPLOYMENT_S3_BUCKET}}/" --acl public-read --follow-symlinks --delete
+        env:
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          DEPLOYMENT_S3_BUCKET: "web-staging-bucket"
+      - name: Invalidate Cloudfront
+        uses: chetan/invalidate-cloudfront-action@v2
+        env:
+          DISTRIBUTION: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }}
+          PATHS: "/*"
+          AWS_REGION: ${{ env.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+
+  deploy-shopify-prod:
+    timeout-minutes: 15
+    needs: [deploy-cdk-prod]
+    runs-on: self-hosted
+    container: node:18
+    working-directory: shopify
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Deploy Shopify
+        run: yarn deploy-shopify-prod
+
+  slack-notification-on-failure:
+    # This will make the steps run if ANY of these jobs fail
+    needs:
+      - frontend-tests
+      - backend-tests
+      - deploy-cdk-staging
+      - deploy-web-staging
+      - deploy-shopify-staging
+      - deploy-cdk-prod
+      - deploy-web-prod
+      - deploy-shopify-prod
+    if: failure()
+    timeout-minutes: 5
+    runs-on: self-hosted
+    container: node:18
+    steps:
+      - name: Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_NOTIFICATION_WEBHOOK_URL }}
+          SLACK_MESSAGE: "App Deployment Failed"
+          SLACK_USERNAME: "Github Actions"

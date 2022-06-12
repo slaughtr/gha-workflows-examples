@@ -1,0 +1,60 @@
+name: Generate Development Builds
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  start-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch PR JSON
+        id: pr_data
+        run: |
+          PR_STRING=$(curl --request GET \
+              --url ${{ github.event.issue.pull_request.url }} \
+              --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+              --header 'content-type: application/json' \
+              --fail \
+              --silent)
+          PR_STRING_FORMATTED=$(echo $PR_STRING | jq -rc '{ head_ref: .head.ref, pr_number: .number }')
+          echo "::set-output name=value::$PR_STRING_FORMATTED"
+      - name: Get Head Ref
+        id: head_ref
+        run: |
+          HEAD_REF=$(echo '${{ steps.pr_data.outputs.value }}' | jq -r '.head_ref')
+          echo "::set-output name=value::$HEAD_REF"
+      - name: Get PR Number
+        id: pr_number
+        run: |
+          PR_NUMBER=$(echo '${{ steps.pr_data.outputs.value }}' | jq -r '.pr_number')
+          echo "::set-output name=value::$PR_NUMBER"
+      - name: Schedule build on Bitrise
+        run: |
+          echo -n '{
+            "hook_info":{
+              "type":"bitrise",
+              "build_trigger_token":"' > bitrise_payload.json
+
+          echo -n ${{ secrets.BITRISE_TOKEN }} >> bitrise_payload.json
+
+          echo '"
+            },
+            "build_params": {
+              "branch": "${{ steps.head_ref.outputs.value }}",
+              "workflow_id": "build-app",
+              "environments": [{
+                "mapped_to":"BITRISE_PULL_REQUEST",
+                "value":"${{ steps.pr_number.outputs.value }}",
+                "is_expand":true
+              }]
+            },
+            "triggered_by":"curl"
+            }
+          ' >> bitrise_payload.json
+
+          curl -X POST \
+          -H 'Content-type: application/json' \
+          --data @bitrise_payload.json \
+          --fail \
+          https://app.bitrise.io/app/abc123/build/start.json

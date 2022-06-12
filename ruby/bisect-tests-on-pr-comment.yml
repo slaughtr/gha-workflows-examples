@@ -1,0 +1,28 @@
+name: Bisect tests
+
+on: 
+  issue_comment:
+    types:
+      - created
+
+jobs:
+  tests:
+    if: ${{ github.event.issue.pull_request && github.event.comment.body == 'bisect tests'}}
+    name: Bisect Tests
+    runs-on: ubuntu-latest
+    env:
+      RAILS_ENV: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Setup Ruby and install gems
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Run tests
+        # --seed makes it run tests in a random, but deterministic order
+        # --order rand would make it actually random
+        # --bisect will make it re-run test batches to determine the
+        # likely source of successive failures, IE order-dependent
+        # or things being set but not unset in a test, etc
+        run: bundle exec rspec --seed 1234 --bisect

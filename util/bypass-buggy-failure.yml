@@ -1,0 +1,65 @@
+name: Deploy Serverless to Prod
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod:
+    environment: prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      # This will be used in the bypass if the timeout is hit
+      - name: Get Deployment Start Time
+        run: echo "DEPLOY_STARTED=$(date +%s)" >> $GITHUB_ENV
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - uses: c-hive/gha-npm-cache@v1
+      - name: Install Dependencies
+        run: npm install
+      - name: Install Serverless Globally
+        run: npm install -g serverless
+      - name: Configure AWS Production Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+      - name: Database Migrations
+        run: npm run migration
+      - name: Deploy Serverless Prod
+        continue-on-error: true
+        run: serverless deploy --stage prod --verbose
+        # Somewhat hacky way to get around serverless hanging indefinitely
+        # If you're deploying new resources or changing something that takes a while
+        # you might want to comment out this line or change it to something more reasonable
+        timeout-minutes: 15
+      
+        # Due to the hacky nature of above and serverless's weird hanging
+        # We need this job to pass if the timeout is the failure reason
+        # This could break if Serverless updates output of `deploy list`
+      - name: Timeout bypass
+        if: always()
+        run: |
+          # This command does not exit properly either, so we use `timeout` to quit it after 20 seconds
+          # 20 seconds should be more than enough time for it to pull
+          # || true at the end prevents the exit code from timeout propagating
+          echo "Getting list of deployments"
+          DEPLOYMENT_LIST=$(timeout 20 serverless deploy list --stage prod || true)
+          echo "Got list of deployments"
+          # This pulls the timestamp of the last deployment out of the above command
+          echo "Getting last deployment timestamp"
+          LAST_DEPLOYMENT=$(echo "$DEPLOYMENT_LIST" | grep "Timestamp" | tail -n 1 | cut -d : -f 3)
+          echo "Last deployment was at $LAST_DEPLOYMENT"
+          # If the last deployment happened since we started this workflow, we're good!
+          if [ $(( $LAST_DEPLOYMENT - $DEPLOY_STARTED )) -gt 0 ]; then                                
+            echo "Previous step deployed successfully, exiting"
+            exit 0
+          else
+            echo "Previous step did not deploy successfully, failing"
+            exit 255
+          fi

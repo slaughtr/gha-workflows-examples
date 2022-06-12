@@ -1,0 +1,53 @@
+name: Deploy Serverless to Prod
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod-server:
+    environment: prod
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - uses: c-hive/gha-npm-cache@v1
+      - name: Install Serverless
+        run: npm install -g serverless
+      - name: Install Dependencies
+        run: npm install
+      - name: Configure AWS Production Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+      - name: Deploy Serverless Prod
+        run: serverless deploy --stage prod --verbose
+
+  deploy-prod-web:
+    environment: production
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: 16
+      - uses: c-hive/gha-npm-cache@v1
+      - name: Install Dependencies
+        run: npm install
+      - name: Build app
+        run: npm run build
+      - name: Deploy App
+        run: npm run deploy

@@ -1,0 +1,57 @@
+name: Deploy Apollo App
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency: deploy-apollo-app-on-pr-merge
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+      - name: Use npm cache web
+        uses: c-hive/gha-npm-cache@v1
+        with:
+          directory: web
+      - name: Use npm cache backend
+        uses: c-hive/gha-npm-cache@v1
+        with:
+          directory: backend
+      - run: npm install -g serverless apollo
+      - name: Configure AWS Production Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID_PROD }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY_PROD }}
+          aws-region: us-west-2
+      - name: Build web app
+        working-directory: web
+        run: npm run build-web
+      - name: Prepare backend app
+        working-directory: backend
+        run: |
+          npm run build-backend
+          npm run apollo:schema:generate
+          npm run apollo:service:push
+          npm run sync-apollo-indexes
+      - name: Deploy backend app
+        working-directory: backend
+        run: npm run deploy-backend
+      - name: Load Test
+        working-directory: backend
+        # This is a little hacky but load test can fail due to high traffic
+        # Worthwhile to check the output occasionally to make sure that the reason
+        # it failed is the script and not artillery
+        continue-on-error: true
+        run: npm run load-test
+      - name: Deploy web app
+        working-directory: web
+        run: npm run deploy-web
